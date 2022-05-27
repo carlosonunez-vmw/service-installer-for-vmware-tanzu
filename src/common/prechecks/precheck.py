@@ -189,7 +189,7 @@ def tkgm_management_cluster_already_exists():
             current_app.logger.debug(f"This Tanzu config does not have any servers in it: {fp}")
             return False
         current_app.logger.debug(f"Data: {str(data)}")
-        clusters_in_config = [ server.name for server in data['servers'] ]
+        clusters_in_config = [ server['name'] for server in data['servers'] ]
         return (cluster in clusters_in_config)
 
     if not env_type_is_tkgm():
