@@ -162,17 +162,22 @@ def disable_proxy():
     }
     return jsonify(d), 200
 
+def get_cluster_from_state(key):
+    return request.get_json()['tkgComponentSpec']['tkgMgmtComponents'][key]
+
 def get_tkgm_management_cluster_from_session_state():
-    request.get_json()['tkgComponentSpec']['tkgMgmtComponents']['tkgMgmtClusterName']
+    return get_cluster_from_state('tkgMgmtClusterName')
 
+def get_tkgm_shared_services_cluster_from_session_state():
+    return get_cluster_from_state('tkgmSharedserviceClusterName')
 
-def tkgm_management_cluster_already_exists():
+def check_cluster_exists_in_tanzu_config(cluster_name):
     def env_type_is_tkgm():
         env_type = request.get_json()['envSpec']['envType'].lower()
         current_app.logger.debug(f"Wanted env type 'tkgm'; got '{env_type}'")
         return env_type == 'tkgm'
 
-    def management_cluster_in_tanzu_config(cluster):
+    def cluster_in_config(cluster):
         home_dir = '/root'
         if 'HOME' in os.environ:
             home_dir = os.environ['HOME']
@@ -188,18 +193,27 @@ def tkgm_management_cluster_already_exists():
         if 'servers' not in data:
             current_app.logger.debug(f"This Tanzu config does not have any servers in it: {fp}")
             return False
-        current_app.logger.debug(f"Data: {str(data)}")
         clusters_in_config = [ server['name'] for server in data['servers'] ]
         return (cluster in clusters_in_config)
 
     if not env_type_is_tkgm():
         return False
     try:
-        cluster_name = get_tkgm_management_cluster_from_session_state()
+        return cluster_in_config(cluster_name)
     except Exception as e:
         current_app.logger.debug(f"Unable to resolve cluster name from session state: {str(e)}")
         return False
-    return management_cluster_in_tanzu_config(cluster_name)
+
+def tkgm_management_cluster_already_exists():
+    try:
+        return check_cluster_exists_in_tanzu_config(get_tkgm_management_cluster_from_session_state())
+    except: return False
+
+def tkgm_shared_services_cluster_already_exists():
+    try:
+        cluster = get_tkgm_shared_services_cluster_from_session_state()
+        return check_cluster_exists_in_tanzu_config(cluster)
+    except: return False
 
 @vcenter_precheck.route("/api/tanzu/precheck", methods=['POST'])
 def precheck_env():
@@ -213,13 +227,22 @@ def precheck_env():
         }
         return jsonify(d), 500
     if tkgm_management_cluster_already_exists():
-       response = {
-            "ERROR_CODE": 500,
-            "responseType": "ERROR",
-            "msg": f"TKGm management cluster '{get_tkgm_management_cluster_from_session_state()}' " +
-                   "already exists; run this 'arcas' command again with '--delete-management-cluster'"
+        cluster = get_tkgm_management_cluster_from_session_state()
+        response = {
+               "ERROR_CODE": 500,
+               "responseType": "ERROR",
+               "msg": f"TKGm management cluster '{cluster}' already exists; " +
+               f"run 'tanzu management-cluster delete '{cluster}' to delete it"
         }
-       return jsonify(response), 500
+        return jsonify(response), 500
+    if tkgm_shared_services_cluster_already_exists():
+        cluster = get_tkgm_shared_services_cluster_from_session_state()
+        response = {
+               "ERROR_CODE": 500,
+               "responseType": "ERROR",
+               "msg": f"TKGm shared services cluster '{cluster}' already exists; "
+        }
+        return jsonify(response), 500
     env = env[0]
     cmd_doc_start = ["systemctl", "start", "docker"]
     try:
